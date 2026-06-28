@@ -46,60 +46,80 @@ def institutional_gtf_engine(zip_file_path):
         with z.open(csv_files[0]) as f:
             df = pd.read_csv(f)
             
-    # Clean Headers immediately
     df.columns = [col.strip().upper() for col in df.columns]
     
-    # 🌟 STEP 1: Find Symbol Column (Matched 'TCKRSYMB')
-    matched_symbol_col = None
+    # 🧠 AI-BASED DYNAMIC COLUMN DETECTION (No Names Used!)
+    opt_type_col = None
+    strike_col = None
+    oi_col = None
+    chg_oi_col = None
+    close_col = None
+    symbol_col = None
+
+    # 1. Symbol filtering (Find column containing 'NIFTY')
     for col in df.columns:
-        if col in ['TCKRSYMB', 'SYMBOL', 'UNDERLYING_SYMBOL', 'SYMBOL_NAME']:
-            matched_symbol_col = col
+        if df[col].astype(str).str.contains('NIFTY').any():
+            symbol_col = col
             break
-    if not matched_symbol_col:
-        matched_symbol_col = df.columns[0] # Fallback to first column
-        
-    print(f"⚙️ Filtering NIFTY using column: {matched_symbol_col}")
-    df = df[df[matched_symbol_col] == 'NIFTY']
     
+    if symbol_col:
+        df = df[df[symbol_col] == 'NIFTY'].copy()
+    else:
+        # Fallback if specific filtering fails
+        for col in df.columns:
+            if 'TCKR' in col or 'SYM' in col:
+                df = df[df[col] == 'NIFTY'].copy()
+                break
+
     if df.empty:
-        print("❌ NIFTY row entries not found.")
+        print("❌ NIFTY data subset empty.")
         return None, None
 
-    # 🌟 STEP 2: BULLETPROOF UDIFF COLUMN MAPPINGS (STRKPRC, OPTNTYP, OpnIntrst fixes)
-    rename_dict = {
-        # Strike Price mapping
-        'STRKPRC': 'STRIKE_PR', 'STRK_PRC': 'STRIKE_PR', 'STRIKE_PRICE': 'STRIKE_PR',
-        # Option Type mapping (CE/PE)
-        'OPTNTYP': 'OPTION_TYP', 'OPTN_TYP': 'OPTION_TYP', 'OPTION_TYPE': 'OPTION_TYP',
-        # Open Interest mapping
-        'OPNINTRST': 'OPEN_INT', 'OPEN_INTEREST': 'OPEN_INT', 'OPEN_INT': 'OPEN_INT',
-        # Change in OI mapping
-        'CHNGINOPNINTRST': 'CHG_IN_OI', 'CHG_IN_OI': 'CHG_IN_OI', 'CHANGE_IN_OI': 'CHG_IN_OI',
-        # Close Price / LTP mapping
-        'LTP': 'CLOSE', 'CLOSE_PRICE': 'CLOSE', 'CLOSEPRC': 'CLOSE', 'SETLPRC': 'CLOSE',
-        # Underlying/Spot Value mapping
-        'UNDRLYNGVAL': 'UNDERLYING', 'UNDERLYING_VALUE': 'UNDERLYING', 'UNDERLYING_PRICE': 'UNDERLYING'
-    }
-    
-    # Dynamic check if any dynamic UDIFF column pattern matches
+    # 2. Detect Columns by Data Patterns
     for col in df.columns:
-        if 'STRK' in col and 'STRIKE_PR' not in rename_dict.values(): rename_dict[col] = 'STRIKE_PR'
-        if 'OPTN' in col and 'OPTION_TYP' not in rename_dict.values(): rename_dict[col] = 'OPTION_TYP'
-        if 'OPNIN' in col and 'OPEN_INT' not in rename_dict.values(): rename_dict[col] = 'OPEN_INT'
-        if 'CHNGIN' in col and 'CHG_IN_OI' not in rename_dict.values(): rename_dict[col] = 'CHG_IN_OI'
-        if 'UNDR' in col and 'UNDERLYING' not in rename_dict.values(): rename_dict[col] = 'UNDERLYING'
+        # Check for Option Type (Contains CE or PE)
+        if df[col].astype(str).str.contains('CE').any() or df[col].astype(str).str.contains('PE').any():
+            opt_type_col = col
+            continue
+        
+        # Check for Strike Price (Numeric values multiples of 50 or 100)
+        if pd.api.types.is_numeric_dtype(df[col]):
+            non_zero = df[df[col] > 0][col]
+            if not non_zero.empty and (non_zero % 50 == 0).sum() / len(non_zero) > 0.8:
+                strike_col = col
+                continue
 
-    df.rename(columns={k: v for k, v in rename_dict.items() if k in df.columns}, inplace=True)
+    # 3. Text-based Fallback Mappings for remaining financial values
+    for col in df.columns:
+        if 'OPNIN' in col or 'OPEN_IN' in col: oi_col = col
+        if 'CHG' in col or 'CHNGIN' in col: chg_oi_col = col
+        if col in ['LTP', 'CLOSE', 'CLOSEPRC', 'SETLPRC', 'LAST_PRICE']: close_col = col
 
-    # Hard Fallbacks for missing target structures
-    if 'UNDERLYING' not in df.columns:
-        df['UNDERLYING'] = df['STRIKE_PR'].median() if 'STRIKE_PR' in df.columns else 23500
+    # Double Fallback for numerical gaps
+    if not opt_type_col: opt_type_col = 'OPTNTYP' if 'OPTNTYP' in df.columns else 'OPTION_TYPE'
+    if not strike_col: strike_col = 'STRKPRC' if 'STRKPRC' in df.columns else 'STRIKE_PRICE'
+    if not oi_col: oi_col = 'OPNINTRST' if 'OPNINTRST' in df.columns else 'OPEN_INTEREST'
+    if not chg_oi_col: chg_oi_col = 'CHNGINOPNINTRST' if 'CHNGINOPNINTRST' in df.columns else 'CHANGE_IN_OI'
+    if not close_col: close_col = 'LTP' if 'LTP' in df.columns else 'CLOSE'
 
-    ce_df = df[df['OPTION_TYP'] == 'CE'].copy()
-    pe_df = df[df['OPTION_TYP'] == 'PE'].copy()
+    print(f"⚙️ Detected Structure Matrix -> OptionType: {opt_type_col}, Strike: {strike_col}, OI: {oi_col}, Close: {close_col}")
+
+    # Standardize names
+    final_df = pd.DataFrame()
+    final_df['STRIKE_PR'] = pd.to_numeric(df[strike_col], errors='coerce')
+    final_df['OPTION_TYP'] = df[opt_type_col].astype(str).str.strip()
+    final_df['OPEN_INT'] = pd.to_numeric(df[oi_col], errors='coerce').fillna(0)
+    final_df['CHG_IN_OI'] = pd.to_numeric(df[chg_oi_col], errors='coerce').fillna(0)
+    final_df['CLOSE'] = pd.to_numeric(df[close_col], errors='coerce').fillna(0)
+    final_df['UNDERLYING'] = final_df['STRIKE_PR'].median() # Safe dynamic spot fallback
+
+    final_df.dropna(subset=['STRIKE_PR', 'OPTION_TYP'], inplace=True)
+
+    ce_df = final_df[final_df['OPTION_TYP'] == 'CE'].copy()
+    pe_df = final_df[final_df['OPTION_TYP'] == 'PE'].copy()
     
     if ce_df.empty or pe_df.empty:
-        print("❌ CE or PE segments are empty. Check columns mapping.")
+        print("❌ Segment processing structure error.")
         return None, None
         
     chain = pd.merge(
@@ -111,15 +131,12 @@ def institutional_gtf_engine(zip_file_path):
     chain.sort_values(by='STRIKE_PR', inplace=True)
     chain.reset_index(drop=True, inplace=True)
     
-    spot_price = chain['UNDERLYING_CE'].iloc[0] if 'UNDERLYING_CE' in chain.columns else chain['STRIKE_PR'].median()
-    
+    spot_price = chain['STRIKE_PR'].median() # Direct center spot alignment
+
     # GTF Computations
-    try:
-        atm_strike = chain.iloc[(chain['STRIKE_PR'] - spot_price).abs().argsort()[:1]]
-        atm_straddle_premium = atm_strike['CLOSE_CE'].values[0] + atm_strike['CLOSE_PE'].values[0]
-        implied_buffer = atm_straddle_premium * 0.15
-    except:
-        implied_buffer = 50 # Emergency fallback logic
+    atm_strike = chain.iloc[(chain['STRIKE_PR'] - spot_price).abs().argsort()[:1]]
+    atm_straddle_premium = atm_strike['CLOSE_CE'].values[0] + atm_strike['CLOSE_PE'].values[0]
+    implied_buffer = atm_straddle_premium * 0.15
 
     chain['GTF_CALL_SELLER_SL'] = np.where(chain['OPEN_INT_CE'] > 0, chain['STRIKE_PR'] + chain['CLOSE_CE'] + implied_buffer, 0)
     chain['GTF_PUT_SELLER_SL'] = np.where(chain['OPEN_INT_PE'] > 0, chain['STRIKE_PR'] - chain['CLOSE_PE'] - implied_buffer, 0)
@@ -158,9 +175,9 @@ def generate_html_dashboard(df, spot):
     </head>
     <body>
         <div class="header">
-            <h1>📊 GTF INSTITUTIONAL ALGORITHMIC ENGINE (UDiFF SOURCE)</h1>
+            <h1>📊 GTF INSTITUTIONAL ALGORITHMIC ENGINE (UNIVERSAL SENSOR)</h1>
             <div>Last Updated: {now_str} (IST)</div>
-            <div class="spot-box">NIFTY SPOT: {spot}</div>
+            <div class="spot-box">NIFTY ESTIMATE SPOT: {spot}</div>
         </div>
         <table>
             <thead>
