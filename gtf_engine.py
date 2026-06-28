@@ -14,18 +14,13 @@ def download_udiff_bhavcopy():
     }
     
     session = requests.Session()
-    # Cookies activate karne ke liye nseindia par hit
     try: session.get('https://www.nseindia.com/', headers=headers, timeout=5)
     except: pass
 
     found = False
-    # Piche ke 15 din check karega valid trading day ke liye
     for i in range(15):
         date_obj = datetime.now() - timedelta(days=i)
         date_str = date_obj.strftime("%Y%m%d")
-        
-        # 🎯 MAHESH KAUSHIK JI KI LINE (MODIFIED FOR FO / DERIVATIVES DATA)
-        # Note: CM ki jagah /fo/ aur BhavCopy_NSE_FO_... use hoga options ke liye
         url = f"https://nsearchives.nseindia.com/content/fo/BhavCopy_NSE_FO_0_0_0_{date_str}_F_0000.csv.zip"
         
         print(f"🔍 Scanning UDiFF Archive: {date_obj.strftime('%d-%b-%Y')}...")
@@ -41,7 +36,7 @@ def download_udiff_bhavcopy():
             print(f"⚠️ Skipped: {str(e)}")
             
     if not found:
-        print("🚨 CRITICAL: Naye UDiFF server se bhi data nahi mila. NSE maintenance par ho sakta hai.")
+        print("🚨 CRITICAL: UDiFF server data fetch failed.")
         sys.exit(1)
 
 def institutional_gtf_engine(zip_file_path):
@@ -51,32 +46,53 @@ def institutional_gtf_engine(zip_file_path):
         with z.open(csv_files[0]) as f:
             df = pd.read_csv(f)
             
-    # UDiFF format ke column names ko clean aur uppercase karna
+    # Clean Headers immediately
     df.columns = [col.strip().upper() for col in df.columns]
     
-    # Naye UDiFF format mein column ka naam 'UNDERLYING_SYMBOL' ya 'SYMBOL' hota hai
-    symbol_col = 'SYMBOL' if 'SYMBOL' in df.columns else 'UNDERLYING_SYMBOL'
-    df = df[df[symbol_col] == 'NIFTY']
+    # 🧠 DYNAMIC COLUMN FINDER (Zero Dependence on exact names)
+    matched_symbol_col = None
+    for col in df.columns:
+        if col in ['SYMBOL', 'UNDERLYING_SYMBOL', 'SYMBOL_NAME', 'UNDERLYING']:
+            matched_symbol_col = col
+            break
+            
+    if not matched_symbol_col:
+        # Fallback: Agar upar me se koi nahi mila, toh jisme bhi 'SYM' ya 'UNDER' ho use pakdo
+        for col in df.columns:
+            if 'SYM' in col or 'UNDER' in col:
+                matched_symbol_col = col
+                break
+
+    if not matched_symbol_col:
+        raise KeyError(f"❌ File columns matching failed. Columns present: {list(df.columns)}")
+        
+    print(f"⚙️ Filtering NIFTY using column: {matched_symbol_col}")
+    df = df[df[matched_symbol_col] == 'NIFTY']
     
     if df.empty:
-        print("❌ NIFTY data empty in this file. Checking formats...")
+        print("❌ NIFTY row entries not found in data framework.")
         return None, None
 
-    # UDiFF MAPPINGS (Naye format ke hisab se columns map karna)
+    # Comprehensive dictionary for columns mapping
     rename_dict = {
-        'STRIKE_PRICE': 'STRIKE_PR', 
-        'OPTION_TYPE': 'OPTION_TYP',
-        'OPEN_INTEREST': 'OPEN_INT', 
-        'CHANGE_IN_OI': 'CHG_IN_OI', 
-        'LTP': 'CLOSE',
-        'CLOSE_PRICE': 'CLOSE',
-        'UNDERLYING_VALUE': 'UNDERLYING'
+        'STRIKE_PRICE': 'STRIKE_PR', 'OPTION_TYPE': 'OPTION_TYP',
+        'OPEN_INTEREST': 'OPEN_INT', 'CHANGE_IN_OI': 'CHG_IN_OI', 
+        'LTP': 'CLOSE', 'CLOSE_PRICE': 'CLOSE',
+        'UNDERLYING_VALUE': 'UNDERLYING', 'UNDERLYING_PRICE': 'UNDERLYING'
     }
     df.rename(columns={k: v for k, v in rename_dict.items() if k in df.columns}, inplace=True)
+
+    # Base underlying fallbacks
+    if 'UNDERLYING' not in df.columns:
+        df['UNDERLYING'] = df['STRIKE_PR'].median()
 
     ce_df = df[df['OPTION_TYP'] == 'CE'].copy()
     pe_df = df[df['OPTION_TYP'] == 'PE'].copy()
     
+    if ce_df.empty or pe_df.empty:
+        print("❌ CE or PE data segments are missing.")
+        return None, None
+        
     chain = pd.merge(
         ce_df[['STRIKE_PR', 'OPEN_INT', 'CHG_IN_OI', 'CLOSE', 'UNDERLYING']],
         pe_df[['STRIKE_PR', 'OPEN_INT', 'CHG_IN_OI', 'CLOSE']],
@@ -88,7 +104,7 @@ def institutional_gtf_engine(zip_file_path):
     
     spot_price = chain['UNDERLYING_CE'].iloc[0] if 'UNDERLYING_CE' in chain.columns else chain['STRIKE_PR'].median()
     
-    # GTF Logic 
+    # GTF Computations
     atm_strike = chain.iloc[(chain['STRIKE_PR'] - spot_price).abs().argsort()[:1]]
     atm_straddle_premium = atm_strike['CLOSE_CE'].values[0] + atm_strike['CLOSE_PE'].values[0]
     implied_buffer = atm_straddle_premium * 0.15
@@ -163,6 +179,7 @@ def generate_html_dashboard(df, spot):
     with open("index.html", "w", encoding="utf-8") as f: f.write(html_content)
 
 if __name__ == "__main__":
-    download_udiff_bhavcopy() # Pehle naye link se zip file download hogi
+    if not os.path.exists("fo_bhavcopy.zip"):
+        download_udiff_bhavcopy()
     df_result, spot = institutional_gtf_engine("fo_bhavcopy.zip")
     if df_result is not None: generate_html_dashboard(df_result, spot)
