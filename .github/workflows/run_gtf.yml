@@ -1,0 +1,57 @@
+name: Deploy GTF Dashboard to GitHub Pages
+
+on:
+  schedule:
+    - cron: '30 12 * * 1-5' # Mon-Fri shaam 6:00 PM IST
+  workflow_dispatch: # Manual Button
+
+permissions:
+  contents: write # Token ko changes commit karne ki permission dene ke liye
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v3
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.10'
+
+    - name: Install Dependencies
+      run: |
+        pip install pandas numpy requests
+
+    - name: Smart Fetch Latest NSE Bhavcopy
+      run: |
+        python -c "
+        import requests, datetime, sys
+        headers = {'User-Agent': 'Mozilla/5.0'}
+        found = False
+        for i in range(10):
+            target_date = datetime.datetime.now() - datetime.timedelta(days=i)
+            day, month, year = target_date.strftime('%d'), target_date.strftime('%b').upper(), target_date.strftime('%Y')
+            url = f'https://archives.nseindia.com/content/historical/DERIVATIVES/{year}/{month}/fo{day}{month}{year}bhav.csv.zip'
+            print(f'🔍 Checking: {day}-{month}-{year}')
+            try:
+                response = requests.get(url, headers=headers, timeout=15)
+                if response.status_code == 200:
+                    with open('fo_bhavcopy.zip', 'wb') as f: f.write(response.content)
+                    print(f'🎯 Found Data for: {day}-{month}-{year}')
+                    found = True; break
+            except: pass
+        if not found: sys.exit(1)
+        "
+
+    - name: Run GTF Engine
+      run: |
+        python gtf_engine.py
+
+    - name: Deploy to GitHub Pages
+      uses: peaceiris/actions-gh-pages@v3
+      with:
+        github_token: ${{ secrets.GITHUB_TOKEN }}
+        publish_dir: ./
+        keep_files: false
