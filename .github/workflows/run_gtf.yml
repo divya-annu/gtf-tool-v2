@@ -1,4 +1,4 @@
-name: Deploy GTF Dashboard to GitHub Pages
+ name: Deploy GTF Dashboard to GitHub Pages
 
 on:
   schedule:
@@ -6,7 +6,7 @@ on:
   workflow_dispatch: # Manual Button
 
 permissions:
-  contents: write # Token ko changes commit karne ki permission dene ke liye
+  contents: write
 
 jobs:
   build-and-deploy:
@@ -24,25 +24,50 @@ jobs:
       run: |
         pip install pandas numpy requests
 
-    - name: Smart Fetch Latest NSE Bhavcopy
+    - name: Smart Fetch Latest NSE Bhavcopy (Bulletproof Fix)
       run: |
         python -c "
-        import requests, datetime, sys
-        headers = {'User-Agent': 'Mozilla/5.0'}
+        import requests, datetime, sys, zipfile, os
+
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+            'Accept-Language': 'en-US,en;q=0.9',
+            'Referer': 'https://www.nseindia.com/'
+        }
+        
         found = False
-        for i in range(10):
+        session = requests.Session()
+        # Pehle NSE ki main site par hit marna padta hai cookies activate karne ke liye
+        try:
+            session.get('https://www.nseindia.com/', headers=headers, timeout=10)
+        except:
+            pass
+
+        for i in range(15): # Range badha kar 15 din kar di hai safer side ke liye
             target_date = datetime.datetime.now() - datetime.timedelta(days=i)
-            day, month, year = target_date.strftime('%d'), target_date.strftime('%b').upper(), target_date.strftime('%Y')
+            day = target_date.strftime('%d')
+            month = target_date.strftime('%b').upper()
+            year = target_date.strftime('%Y')
+            
+            # MODERN NSE URL FORMAT
             url = f'https://archives.nseindia.com/content/historical/DERIVATIVES/{year}/{month}/fo{day}{month}{year}bhav.csv.zip'
-            print(f'🔍 Checking: {day}-{month}-{year}')
+            print(f'🔍 Scanning Archive: {day}-{month}-{year}...')
+            
             try:
-                response = requests.get(url, headers=headers, timeout=15)
-                if response.status_code == 200:
-                    with open('fo_bhavcopy.zip', 'wb') as f: f.write(response.content)
-                    print(f'🎯 Found Data for: {day}-{month}-{year}')
-                    found = True; break
-            except: pass
-        if not found: sys.exit(1)
+                response = session.get(url, headers=headers, timeout=15)
+                if response.status_code == 200 and len(response.content) > 5000:
+                    with open('fo_bhavcopy.zip', 'wb') as f:
+                        f.write(response.content)
+                    print(f'🎯 SUCCESS! Downloaded data from: {day}-{month}-{year}')
+                    found = True
+                    break
+            except Exception as e:
+                print(f'⚠️ Connection skipped for {day}-{month}-{year}')
+                
+        if not found:
+            print('🚨 CRITICAL: NSE Data formats altered by Exchange or Server Down. Forcing Exit.')
+            sys.exit(1)
         "
 
     - name: Run GTF Engine
@@ -54,4 +79,4 @@ jobs:
       with:
         github_token: ${{ secrets.GITHUB_TOKEN }}
         publish_dir: ./
-        keep_files: false
+        keep_files: false           
