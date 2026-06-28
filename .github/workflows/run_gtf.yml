@@ -24,45 +24,7 @@ jobs:
       run: |
         pip install pandas numpy requests
 
-    - name: Smart Fetch Latest NSE Bhavcopy
-      run: |
-        python -c "
-        import requests, datetime, sys, os
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
-            'Accept-Language': 'en-US,en;q=0.9',
-            'Referer': 'https://www.nseindia.com/'
-        }
-        found = False
-        session = requests.Session()
-        try:
-            session.get('https://www.nseindia.com/', headers=headers, timeout=10)
-        except:
-            pass
-        for i in range(15):
-            target_date = datetime.datetime.now() - datetime.timedelta(days=i)
-            day = target_date.strftime('%d')
-            month = target_date.strftime('%b').upper()
-            year = target_date.strftime('%Y')
-            url = f'https://archives.nseindia.com/content/historical/DERIVATIVES/{year}/{month}/fo{day}{month}{year}bhav.csv.zip'
-            print(f'🔍 Scanning Archive: {day}-{month}-{year}...')
-            try:
-                response = session.get(url, headers=headers, timeout=15)
-                if response.status_code == 200 and len(response.content) > 5000:
-                    with open('fo_bhavcopy.zip', 'wb') as f:
-                        f.write(response.content)
-                    print(f'🎯 SUCCESS! Downloaded data from: {day}-{month}-{year}')
-                    found = True
-                    break
-            except Exception as e:
-                print(f'⚠️ Connection skipped for {day}-{month}-{year}')
-        if not found:
-            print('🚨 CRITICAL: NSE Data formats altered or Server Down.')
-            sys.exit(1)
-        "
-
-    - name: Run GTF Engine
+    - name: Run GTF Engine (Download and Compute)
       run: |
         python gtf_engine.py
 
