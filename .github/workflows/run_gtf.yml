@@ -1,9 +1,9 @@
- name: Deploy GTF Dashboard to GitHub Pages
+name: Deploy GTF Dashboard to GitHub Pages
 
 on:
   schedule:
-    - cron: '30 12 * * 1-5' # Mon-Fri shaam 6:00 PM IST
-  workflow_dispatch: # Manual Button
+    - cron: '30 12 * * 1-5'
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -24,36 +24,29 @@ jobs:
       run: |
         pip install pandas numpy requests
 
-    - name: Smart Fetch Latest NSE Bhavcopy (Bulletproof Fix)
+    - name: Smart Fetch Latest NSE Bhavcopy
       run: |
         python -c "
-        import requests, datetime, sys, zipfile, os
-
+        import requests, datetime, sys, os
         headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
             'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
             'Accept-Language': 'en-US,en;q=0.9',
             'Referer': 'https://www.nseindia.com/'
         }
-        
         found = False
         session = requests.Session()
-        # Pehle NSE ki main site par hit marna padta hai cookies activate karne ke liye
         try:
             session.get('https://www.nseindia.com/', headers=headers, timeout=10)
         except:
             pass
-
-        for i in range(15): # Range badha kar 15 din kar di hai safer side ke liye
+        for i in range(15):
             target_date = datetime.datetime.now() - datetime.timedelta(days=i)
             day = target_date.strftime('%d')
             month = target_date.strftime('%b').upper()
             year = target_date.strftime('%Y')
-            
-            # MODERN NSE URL FORMAT
             url = f'https://archives.nseindia.com/content/historical/DERIVATIVES/{year}/{month}/fo{day}{month}{year}bhav.csv.zip'
             print(f'🔍 Scanning Archive: {day}-{month}-{year}...')
-            
             try:
                 response = session.get(url, headers=headers, timeout=15)
                 if response.status_code == 200 and len(response.content) > 5000:
@@ -64,9 +57,8 @@ jobs:
                     break
             except Exception as e:
                 print(f'⚠️ Connection skipped for {day}-{month}-{year}')
-                
         if not found:
-            print('🚨 CRITICAL: NSE Data formats altered by Exchange or Server Down. Forcing Exit.')
+            print('🚨 CRITICAL: NSE Data formats altered or Server Down.')
             sys.exit(1)
         "
 
@@ -79,4 +71,4 @@ jobs:
       with:
         github_token: ${{ secrets.GITHUB_TOKEN }}
         publish_dir: ./
-        keep_files: false           
+        keep_files: false
