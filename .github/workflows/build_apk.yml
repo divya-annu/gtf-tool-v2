@@ -11,114 +11,27 @@ jobs:
     - name: Checkout Code
       uses: actions/checkout@v4
 
-    - name: Setup Java JDK
-      uses: actions/setup-java@v4
-      with:
-        java-version: '17'
-        distribution: 'temurin'
-
-    # 🌟 YEH STEP BINA CLONE KIYE NATIVE ANDROID SYSTEM KHUD BANAYEGA
-    - name: Generate Native Android App Structure
+    # 🌟 Docker container ka use karke ek dum safe aur standard tarike se APK banana
+    - name: Build APK via Webview CLI
       run: |
-        mkdir -p webapp/app/src/main/java/com/gtf/optionsengine
-        mkdir -p webapp/app/src/main/res/layout
-        mkdir -p webapp/app/src/main/res/values
-
-        # 1. Build script settings
-        cat << 'EOF' > webapp/settings.gradle
-        include ':app'
-        EOF
-
-        cat << 'EOF' > webapp/build.gradle
-        buildscript {
-            repositories { google(); mavenCentral() }
-            dependencies { classpath 'com.android.tools.build:gradle:8.1.1' }
-        }
-        allprojects {
-            repositories { google(); mavenCentral() }
-        }
-        EOF
-
-        cat << 'EOF' > webapp/app/build.gradle
-        plugins {
-            id 'com.android.application'
-        }
-        android {
-            namespace 'com.gtf.optionsengine'
-            compileSdk 34
-            defaultConfig {
-                applicationId "com.gtf.optionsengine"
-                minSdk 24
-                targetSdk 34
-                versionCode 1
-                versionName "1.0"
-            }
-        }
-        EOF
-
-        # 2. App Permissions (Internet Chalu karne ke liye)
-        cat << 'EOF' > webapp/app/src/main/AndroidManifest.xml
-        <manifest xmlns:android="http://schemas.android.com/apk/res/android">
-            <uses-permission android:name="android.permission.INTERNET" />
-            <application android:label="GTF Options Engine" android:theme="@android:style/Theme.Material.NoActionBar" android:usesCleartextTraffic="true">
-                <activity android:name=".MainActivity" android:exported="true">
-                    <intent-filter>
-                        <action android:name="android.intent.action.MAIN" />
-                        <category android:name="android.intent.category.LAUNCHER" />
-                    </intent-filter>
-                </activity>
-            </application>
-        </manifest>
-        EOF
-
-        # 3. Fullscreen Smooth Smooth Webview UI
-        cat << 'EOF' > webapp/app/src/main/res/layout/activity_main.xml
-        <WebView xmlns:android="http://schemas.android.com/apk/res/android"
-            android:id="@+id/webview"
-            android:layout_width="match_parent"
-            android:layout_height="match_parent" />
-        EOF
-
-        # 4. Java Code (Hardware Acceleration & Smooth Scrolling ke sath)
-        cat << 'EOF' > webapp/app/src/main/java/com/gtf/optionsengine/MainActivity.java
-        package com.gtf.optionsengine;
-        import android.os.Bundle;
-        import android.webkit.WebSettings;
-        import android.webkit.WebView;
-        import android.webkit.WebViewClient;
-        import androidx.appcompat.app.AppCompatActivity;
-
-        public class MainActivity extends android.app.Activity {
-            @Override
-            protected void onCreate(Bundle savedInstanceState) {
-                super.onCreate(savedInstanceState);
-                setContentView(R.layout.activity_main);
-                WebView webView = findViewById(R.id.webview);
-                WebSettings webSettings = webView.getSettings();
-                webSettings.setJavaScriptEnabled(true);
-                webSettings.setDomStorageEnabled(true);
-                webSettings.setDatabaseEnabled(true);
-                webSettings.setLoadsImagesAutomatically(true);
-                webView.setWebViewClient(new WebViewClient());
-                
-                // Aapka live dynamic GitHub link automatic generate hoga yahan
-                webView.loadUrl("https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/");
-            }
-        }
-        EOF
-
-    - name: Setup Gradle
-      run: |
-        cd webapp
-        gradle wrapper --gradle-version 8.2
-
-    - name: Build Production APK
-      run: |
-        cd webapp
-        ./gradlew assembleDebug
+        mkdir out
+        docker run --v $PWD/out:/app/out webassembly/webview-cli \
+          --url "https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/" \
+          --title "GTF Options Engine" \
+          --package "com.gtf.optionsengine" \
+          --output /app/out/GTF_Options_Engine.apk || true
+          
+        # Agar upar wala image busy ho, toh backup standard builder use karenge
+        if [ ! -f out/GTF_Options_Engine.apk ]; then
+          echo "Using secondary build system..."
+          docker run --rm -v $PWD/out:/dist ghcr.io/adiwijd/pwa-to-apk:latest \
+            --url "https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/" \
+            --name "GTF Options Engine" \
+            --package "com.gtf.optionsengine"
+        fi
 
     - name: Upload Android APK
       uses: actions/upload-artifact@v4
       with:
         name: GTF-Options-Engine-AndroidAPK
-        path: webapp/app/build/outputs/apk/debug/app-debug.apk
+        path: out/*.apk
