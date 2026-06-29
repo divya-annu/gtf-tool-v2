@@ -11,27 +11,48 @@ jobs:
     - name: Checkout Code
       uses: actions/checkout@v4
 
-    # 🌟 Docker container ka use karke ek dum safe aur standard tarike se APK banana
-    - name: Build APK via Webview CLI
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: 18
+
+    - name: Setup Java JDK
+      uses: actions/setup-java@v4
+      with:
+        java-version: '11'
+        distribution: 'zulu'
+
+    - name: Setup Android SDK
+      uses: android-actions/setup-android@v3
+
+    - name: Install Cordova and Build APK
       run: |
-        mkdir out
-        docker run --v $PWD/out:/app/out webassembly/webview-cli \
-          --url "https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/" \
-          --title "GTF Options Engine" \
-          --package "com.gtf.optionsengine" \
-          --output /app/out/GTF_Options_Engine.apk || true
-          
-        # Agar upar wala image busy ho, toh backup standard builder use karenge
-        if [ ! -f out/GTF_Options_Engine.apk ]; then
-          echo "Using secondary build system..."
-          docker run --rm -v $PWD/out:/dist ghcr.io/adiwijd/pwa-to-apk:latest \
-            --url "https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/" \
-            --name "GTF Options Engine" \
-            --package "com.gtf.optionsengine"
-        fi
+        # 1. Cordova CLI install karo
+        npm install -g cordova
+
+        # 2. Ek naya clean app project create karo
+        cordova create gtfapp com.gtf.optionsengine "GTF Options Engine"
+        cd gtfapp
+
+        # 3. Android platform add karo
+        cordova platform add android --no-telemetry
+
+        # 4. Injected Script: Jo open hote hi aapki live website par redirect karega smoothly
+        cat << 'EOF' > www/js/index.js
+        document.addEventListener('deviceready', onDeviceReady, false);
+        function onDeviceReady() {
+            window.location.href = "https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/";
+        }
+        EOF
+
+        # 5. Config file me internet aur full-screen features update karna
+        sed -i 's|<content src="index.html" />|<content src="index.html" /><allow-navigation href="*" /><preference name="HardwareAcceleration" value="true" />|' config.xml
+
+        # 6. Build Android APK
+        cordova build android --device
 
     - name: Upload Android APK
       uses: actions/upload-artifact@v4
       with:
         name: GTF-Options-Engine-AndroidAPK
-        path: out/*.apk
+        path: gtfapp/platforms/android/app/build/outputs/apk/debug/app-debug.apk
