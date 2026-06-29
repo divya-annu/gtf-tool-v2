@@ -1,7 +1,7 @@
 name: Build Android APK
 
 on:
-  workflow_dispatch: # Jab mann kare button daba kar APK bana lo
+  workflow_dispatch:
 
 jobs:
   build-apk:
@@ -17,19 +17,102 @@ jobs:
         java-version: '17'
         distribution: 'temurin'
 
-    # 🌟 Website ko custom Android container me convert karna
-    - name: Clone Lightweight Webview Wrapper
+    # 🌟 YEH STEP BINA CLONE KIYE NATIVE ANDROID SYSTEM KHUD BANAYEGA
+    - name: Generate Native Android App Structure
       run: |
-        git clone https://github.com/S64/android-web-app-template.git webapp
+        mkdir -p webapp/app/src/main/java/com/gtf/optionsengine
+        mkdir -p webapp/app/src/main/res/layout
+        mkdir -p webapp/app/src/main/res/values
+
+        # 1. Build script settings
+        cat << 'EOF' > webapp/settings.gradle
+        include ':app'
+        EOF
+
+        cat << 'EOF' > webapp/build.gradle
+        buildscript {
+            repositories { google(); mavenCentral() }
+            dependencies { classpath 'com.android.tools.build:gradle:8.1.1' }
+        }
+        allprojects {
+            repositories { google(); mavenCentral() }
+        }
+        EOF
+
+        cat << 'EOF' > webapp/app/build.gradle
+        plugins {
+            id 'com.android.application'
+        }
+        android {
+            namespace 'com.gtf.optionsengine'
+            compileSdk 34
+            defaultConfig {
+                applicationId "com.gtf.optionsengine"
+                minSdk 24
+                targetSdk 34
+                versionCode 1
+                versionName "1.0"
+            }
+        }
+        EOF
+
+        # 2. App Permissions (Internet Chalu karne ke liye)
+        cat << 'EOF' > webapp/app/src/main/AndroidManifest.xml
+        <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+            <uses-permission android:name="android.permission.INTERNET" />
+            <application android:label="GTF Options Engine" android:theme="@android:style/Theme.Material.NoActionBar" android:usesCleartextTraffic="true">
+                <activity android:name=".MainActivity" android:exported="true">
+                    <intent-filter>
+                        <action android:name="android.intent.action.MAIN" />
+                        <category android:name="android.intent.category.LAUNCHER" />
+                    </intent-filter>
+                </activity>
+            </application>
+        </manifest>
+        EOF
+
+        # 3. Fullscreen Smooth Smooth Webview UI
+        cat << 'EOF' > webapp/app/src/main/res/layout/activity_main.xml
+        <WebView xmlns:android="http://schemas.android.com/apk/res/android"
+            android:id="@+id/webview"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent" />
+        EOF
+
+        # 4. Java Code (Hardware Acceleration & Smooth Scrolling ke sath)
+        cat << 'EOF' > webapp/app/src/main/java/com/gtf/optionsengine/MainActivity.java
+        package com.gtf.optionsengine;
+        import android.os.Bundle;
+        import android.webkit.WebSettings;
+        import android.webkit.WebView;
+        import android.webkit.WebViewClient;
+        import androidx.appcompat.app.AppCompatActivity;
+
+        public class MainActivity extends android.app.Activity {
+            @Override
+            protected void onCreate(Bundle savedInstanceState) {
+                super.onCreate(savedInstanceState);
+                setContentView(R.layout.activity_main);
+                WebView webView = findViewById(R.id.webview);
+                WebSettings webSettings = webView.getSettings();
+                webSettings.setJavaScriptEnabled(true);
+                webSettings.setDomStorageEnabled(true);
+                webSettings.setDatabaseEnabled(true);
+                webSettings.setLoadsImagesAutomatically(true);
+                webView.setWebViewClient(new WebViewClient());
+                
+                // Aapka live dynamic GitHub link automatic generate hoga yahan
+                webView.loadUrl("https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/");
+            }
+        }
+        EOF
+
+    - name: Setup Gradle
+      run: |
         cd webapp
-        # App ka naam aur aapki live website ka URL config karna
-        sed -i 's|app_name">.*<|app_name">GTF Options Engine<|' app/src/main/res/values/strings.xml
-        sed -i 's|https://example.com|https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/|' app/src/main/java/moe/shizuku/webapp/MainActivity.java
+        gradle wrapper --gradle-version 8.2
 
-    - name: Grant Execute Permission for Gradle
-      run: chmod +x webapp/gradlew
-
-    - name: Build Debug APK
+    - name: Build Production APK
       run: |
         cd webapp
         ./gradlew assembleDebug
