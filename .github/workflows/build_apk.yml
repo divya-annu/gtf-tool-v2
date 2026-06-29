@@ -1,0 +1,41 @@
+name: Build Android APK
+
+on:
+  workflow_dispatch: # Jab mann kare button daba kar APK bana lo
+
+jobs:
+  build-apk:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v4
+
+    - name: Setup Java JDK
+      uses: actions/setup-java@v4
+      with:
+        java-version: '17'
+        distribution: 'temurin'
+
+    # 🌟 Website ko custom Android container me convert karna
+    - name: Clone Lightweight Webview Wrapper
+      run: |
+        git clone https://github.com/S64/android-web-app-template.git webapp
+        cd webapp
+        # App ka naam aur aapki live website ka URL config karna
+        sed -i 's|app_name">.*<|app_name">GTF Options Engine<|' app/src/main/res/values/strings.xml
+        sed -i 's|https://example.com|https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/|' app/src/main/java/moe/shizuku/webapp/MainActivity.java
+
+    - name: Grant Execute Permission for Gradle
+      run: chmod +x webapp/gradlew
+
+    - name: Build Debug APK
+      run: |
+        cd webapp
+        ./gradlew assembleDebug
+
+    - name: Upload Android APK
+      uses: actions/upload-artifact@v4
+      with:
+        name: GTF-Options-Engine-AndroidAPK
+        path: webapp/app/build/outputs/apk/debug/app-debug.apk
